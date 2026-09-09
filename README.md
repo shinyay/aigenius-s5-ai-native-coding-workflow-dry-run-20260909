@@ -66,6 +66,7 @@ You are the **tech lead** in this workflow. Copilot handles the *how*. You defin
    python app.py add "Deploy the API" --priority high --due 2025-12-31 --tag work
    python app.py add "Buy coffee" --priority low --tag personal
    python app.py list
+   python app.py search "deploy"
    python app.py stats
    ```
 
@@ -137,7 +138,7 @@ Exercise 01 includes Azure-based Options A and B. Choose Option C or D for a cor
   │   ├── ai-genius-s5e1/              # Slide manifest, images, and update guide
   │   └── copilot-app-dx/              # Self-contained Japanese/English HTML DX guide
   └── starter-app/                     # Python CLI task manager to extend
-      ├── app.py                       # CLI: add, list, complete, edit, delete, stats
+      ├── app.py                       # CLI: add, list, search, complete, edit, delete, stats
       ├── requirements.txt             # click, rich, pytest
       └── tests/
           ├── conftest.py              # Shared fixtures (isolated task file)
