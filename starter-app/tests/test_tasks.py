@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from app import (
+    PRIORITY_SEARCH_ORDER,
     add,
     cli,
     complete,
@@ -85,6 +86,9 @@ class TestIsOverdue:
 
 
 class TestSearchHelpers:
+    def test_priority_search_order_is_explicit_high_medium_low(self) -> None:
+        assert PRIORITY_SEARCH_ORDER == {"high": 0, "medium": 1, "low": 2}
+
     def test_search_tasks_matches_name_case_insensitively(self, sample_tasks: list[dict]) -> None:
         matches = search_tasks(sample_tasks, "deploy")
         assert [task["id"] for task in matches] == [2]

@@ -32,7 +32,7 @@ TASKS_FILE = Path(__file__).resolve().with_name("tasks.json")
 
 PRIORITIES = ("low", "medium", "high")
 PRIORITY_COLOURS = {"low": "cyan", "medium": "yellow", "high": "red"}
-PRIORITY_SEARCH_ORDER = {priority: index for index, priority in enumerate(reversed(PRIORITIES))}
+PRIORITY_SEARCH_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 console = Console()
 
