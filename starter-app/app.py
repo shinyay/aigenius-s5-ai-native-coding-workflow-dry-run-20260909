@@ -10,6 +10,7 @@ Usage:
     python app.py list
     python app.py list --status pending --priority high
     python app.py list --overdue
+    python app.py search "deploy"
     python app.py complete 1
     python app.py edit 1 --priority low --due 2026-01-15
     python app.py delete 1
@@ -17,6 +18,7 @@ Usage:
 """
 
 import json
+import re
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -30,6 +32,7 @@ TASKS_FILE = Path(__file__).resolve().with_name("tasks.json")
 
 PRIORITIES = ("low", "medium", "high")
 PRIORITY_COLOURS = {"low": "cyan", "medium": "yellow", "high": "red"}
+PRIORITY_SEARCH_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 console = Console()
 
@@ -145,6 +148,63 @@ def find_task(tasks: list[dict], task_id: int) -> dict | None:
         The matching task dict, or None if not found.
     """
     return next((t for t in tasks if t["id"] == task_id), None)
+
+
+def highlight_match(value: str, keyword: str) -> Text:
+    """Highlight case-insensitive keyword matches in a string.
+
+    Args:
+        value: The text to display.
+        keyword: The keyword to highlight.
+
+    Returns:
+        A Rich Text object with matching spans styled in bold yellow.
+    """
+    text = Text(value)
+    if not keyword:
+        return text
+
+    for match in re.finditer(re.escape(keyword), value, flags=re.IGNORECASE):
+        text.stylize("bold yellow", match.start(), match.end())
+    return text
+
+
+def task_description(task: dict) -> str:
+    """Return a task description as a safe searchable string.
+
+    Args:
+        task: A task dictionary.
+
+    Returns:
+        The task description, or an empty string when missing or empty.
+    """
+    return str(task.get("description") or "")
+
+
+def search_tasks(tasks: list[dict], keyword: str) -> list[dict]:
+    """Find tasks whose name or description contains a keyword.
+
+    Args:
+        tasks: The list of tasks to search.
+        keyword: The non-empty keyword to match case-insensitively.
+
+    Returns:
+        Matching tasks sorted by priority high, medium, low, then ID ascending.
+    """
+    lowered_keyword = keyword.lower()
+    matches = [
+        task
+        for task in tasks
+        if lowered_keyword in str(task.get("name", "")).lower()
+        or lowered_keyword in task_description(task).lower()
+    ]
+    return sorted(
+        matches,
+        key=lambda task: (
+            PRIORITY_SEARCH_ORDER.get(task.get("priority", "medium"), len(PRIORITY_SEARCH_ORDER)),
+            task.get("id", 0),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +356,55 @@ def list_tasks(status: str, priority: str | None, tag: str | None, overdue: bool
             priority_text,
             format_due(task),
             tags_text,
+            status_text,
+        )
+
+    console.print(table)
+
+
+@cli.command()
+@click.argument("keyword", metavar="KEYWORD")
+def search(keyword: str) -> None:
+    """Search tasks by keyword.
+
+    KEYWORD is matched against task names and descriptions.
+
+    Example:
+        python app.py search "deploy"
+    """
+    keyword = keyword.strip()
+    if not keyword:
+        console.print(
+            "[red]Error: Search keyword cannot be empty. "
+            'Provide a non-empty keyword, for example: python app.py search "deploy"[/red]'
+        )
+        sys.exit(1)
+
+    tasks = search_tasks(load_tasks(), keyword)
+    if not tasks:
+        console.print("No tasks match your search.")
+        return
+
+    table = Table(show_header=True, header_style="bold blue", box=None, pad_edge=False)
+    table.add_column("ID", style="dim", width=4, justify="right")
+    table.add_column("Name", min_width=20)
+    table.add_column("Description", min_width=20)
+    table.add_column("Priority", width=8)
+    table.add_column("Status", width=9)
+
+    for task in tasks:
+        prio = task.get("priority", "medium")
+        prio_colour = PRIORITY_COLOURS.get(prio, "white")
+        description = task_description(task)
+        status_text = (
+            Text("Done", style="green") if task.get("done") else Text("Pending", style="yellow")
+        )
+
+        table.add_row(
+            str(task["id"]),
+            highlight_match(str(task.get("name", "")), keyword),
+            highlight_match(description, keyword) if description else Text("—", style="dim"),
+            Text(prio, style=prio_colour),
             status_text,
         )
 

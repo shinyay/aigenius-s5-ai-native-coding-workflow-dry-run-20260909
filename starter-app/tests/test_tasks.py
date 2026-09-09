@@ -7,7 +7,21 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from app import add, cli, complete, delete, edit, is_overdue, list_tasks, load_tasks, save_tasks, stats
+from app import (
+    PRIORITY_SEARCH_ORDER,
+    add,
+    cli,
+    complete,
+    delete,
+    edit,
+    highlight_match,
+    is_overdue,
+    list_tasks,
+    load_tasks,
+    save_tasks,
+    search_tasks,
+    stats,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +83,48 @@ class TestIsOverdue:
     def test_invalid_due_date_is_not_overdue(self) -> None:
         task = {"done": False, "due_date": "not-a-date"}
         assert is_overdue(task) is False
+
+
+class TestSearchHelpers:
+    def test_priority_search_order_is_explicit_high_medium_low(self) -> None:
+        assert PRIORITY_SEARCH_ORDER == {"high": 0, "medium": 1, "low": 2}
+
+    def test_search_tasks_matches_name_case_insensitively(self, sample_tasks: list[dict]) -> None:
+        matches = search_tasks(sample_tasks, "deploy")
+        assert [task["id"] for task in matches] == [2]
+
+    def test_search_tasks_matches_description_only(self, sample_tasks: list[dict]) -> None:
+        matches = search_tasks(sample_tasks, "PIPELINE")
+        assert [task["id"] for task in matches] == [2]
+
+    def test_search_tasks_sorts_by_priority_then_id(self) -> None:
+        tasks = [
+            {"id": 4, "name": "Deploy low", "priority": "low", "done": False},
+            {"id": 3, "name": "Deploy high later", "priority": "high", "done": False},
+            {"id": 1, "name": "Deploy medium", "priority": "medium", "done": False},
+            {"id": 2, "name": "Deploy high earlier", "priority": "high", "done": False},
+        ]
+
+        matches = search_tasks(tasks, "deploy")
+
+        assert [task["id"] for task in matches] == [2, 3, 1, 4]
+
+    def test_highlight_match_preserves_text_and_styles_matches(self) -> None:
+        text = highlight_match("Deploy then deploy", "deploy")
+
+        assert text.plain == "Deploy then deploy"
+        assert [(span.start, span.end, str(span.style)) for span in text.spans] == [
+            (0, 6, "bold yellow"),
+            (12, 18, "bold yellow"),
+        ]
+
+    def test_highlight_match_treats_keyword_as_literal_text(self) -> None:
+        text = highlight_match("Fix a.b task", "a.b")
+
+        assert text.plain == "Fix a.b task"
+        assert [(span.start, span.end, str(span.style)) for span in text.spans] == [
+            (4, 7, "bold yellow"),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +232,89 @@ class TestListCommand:
         result = runner.invoke(cli, ["list", "--tag", "nonexistent"])
         assert result.exit_code == 0
         assert "No tasks match" in result.output
+
+
+class TestSearchCommand:
+    def test_search_help_describes_keyword_and_example(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["search", "--help"])
+
+        assert result.exit_code == 0
+        assert "KEYWORD" in result.output
+        assert 'python app.py search "deploy"' in result.output
+
+    def test_search_shows_pending_and_done_statuses(
+        self, runner: CliRunner, isolated_tasks_file: Path
+    ) -> None:
+        tasks = [
+            {
+                "id": 1,
+                "name": "Deploy API",
+                "description": "",
+                "priority": "high",
+                "done": False,
+            },
+            {
+                "id": 2,
+                "name": "Document deploy",
+                "description": "",
+                "priority": "medium",
+                "done": True,
+            },
+        ]
+        isolated_tasks_file.write_text(json.dumps(tasks), encoding="utf-8")
+
+        result = runner.invoke(cli, ["search", "deploy"])
+
+        assert result.exit_code == 0
+        assert "Deploy API" in result.output
+        assert "Document deploy" in result.output
+        assert "Pending" in result.output
+        assert "Done" in result.output
+
+    def test_search_displays_results_sorted_by_priority_then_id(
+        self, runner: CliRunner, isolated_tasks_file: Path
+    ) -> None:
+        tasks = [
+            {"id": 4, "name": "Deploy low", "priority": "low", "done": False},
+            {"id": 3, "name": "Deploy high later", "priority": "high", "done": False},
+            {"id": 1, "name": "Deploy medium", "priority": "medium", "done": False},
+            {"id": 2, "name": "Deploy high earlier", "priority": "high", "done": False},
+        ]
+        isolated_tasks_file.write_text(json.dumps(tasks), encoding="utf-8")
+
+        result = runner.invoke(cli, ["search", "deploy"])
+
+        assert result.exit_code == 0
+        assert result.output.index("Deploy high earlier") < result.output.index("Deploy high later")
+        assert result.output.index("Deploy high later") < result.output.index("Deploy medium")
+        assert result.output.index("Deploy medium") < result.output.index("Deploy low")
+
+    def test_search_no_match_message_exits_successfully(
+        self, runner: CliRunner, sample_tasks: list[dict]
+    ) -> None:
+        result = runner.invoke(cli, ["search", "missing"])
+
+        assert result.exit_code == 0
+        assert "No tasks match your search." in result.output
+
+    def test_search_blank_keyword_fails_without_listing_tasks(
+        self, runner: CliRunner, sample_tasks: list[dict]
+    ) -> None:
+        result = runner.invoke(cli, ["search", "   "])
+
+        assert result.exit_code != 0
+        assert "Search keyword cannot be empty" in result.output
+        assert "Buy groceries" not in result.output
+
+    def test_search_handles_missing_description(self, runner: CliRunner, isolated_tasks_file: Path) -> None:
+        tasks = [{"id": 1, "name": "Deploy app", "priority": "low", "done": False}]
+        isolated_tasks_file.write_text(json.dumps(tasks), encoding="utf-8")
+
+        result = runner.invoke(cli, ["search", "deploy"])
+
+        assert result.exit_code == 0
+        assert "Deploy app" in result.output
+        assert "—" in result.output
 
 
 class TestCompleteCommand:
